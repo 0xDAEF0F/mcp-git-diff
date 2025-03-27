@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-git/go-git/v5"
@@ -14,80 +15,43 @@ const (
 )
 
 func main() {
-	numCommits := 1
-	commits, err := GetRepoCommits(numCommits)
+	lastWeek := time.Now().AddDate(0, 0, -7)
+	commits, cleanup, err := GetRepoCommitsFrom(lastWeek)
 	if err != nil {
 		fmt.Printf("Failed to get repo commits: %v\n", err)
 		return
 	}
+	defer cleanup()
 
-	count := 0
-	commits.ForEach(func(c *object.Commit) error {
-		firstFiveChars := c.Hash.String()[:5]
-		if count < numCommits {
-			fmt.Printf("Commit %d: %s - %s\n", count+1, firstFiveChars, c.Message)
+	lastCommit := commits[0]
+	firstCommit := commits[len(commits)-1]
 
-			// Get parent to compare with
-			if parent, err := c.Parent(0); err == nil {
-				// Get changes between commit and its parent
-				patch, err := parent.Patch(c)
-				if err == nil {
-					stats := patch.Stats()
-					fmt.Printf("  Files changed: %d\n", len(stats))
-					for _, stat := range stats {
-						fmt.Printf("  %s: +%d -%d\n", stat.Name, stat.Addition, stat.Deletion)
-					}
-					fmt.Println(patch.String()) // Print the full diff
-				}
-			} else if err == object.ErrParentNotFound {
-				// Initial commit with no parent
-				fmt.Println("  Initial commit - no diff available")
-			}
+	patch, err := firstCommit.Patch(lastCommit)
+	if err != nil {
+		fmt.Printf("Failed to get patch: %v\n", err)
+		return
+	}
 
-			count++
+	// Filter out lock files from the patch output
+	patchLines := strings.Split(patch.String(), "\n")
+	var filteredLines []string
+	isLockFile := false
+
+	for _, line := range patchLines {
+		if strings.HasPrefix(line, "diff --git") {
+			isLockFile = strings.Contains(line, "lock")
 		}
-		return nil
-	})
+		if !isLockFile {
+			filteredLines = append(filteredLines, line)
+		}
+	}
+
+	fmt.Print(strings.Join(filteredLines, "\n"))
 }
 
-func GetRepoCommits(numCommits int) (object.CommitIter, error) {
+func getRepo(repoUrl string) (*git.Repository, func(), error) {
 	dir, err := os.MkdirTemp("", "repo-clone")
 	if err != nil {
-		fmt.Printf("Failed to create temp directory\n")
-		return nil, err
-	}
-	defer os.RemoveAll(dir)
-
-	fmt.Printf("Cloning repository\n")
-	repo, err := git.PlainClone(dir, false, &git.CloneOptions{
-		URL:          repoURL,
-		SingleBranch: true,
-		Depth:        numCommits + 1,
-	})
-	if err != nil {
-		fmt.Printf("Failed to clone repository\n")
-		return nil, err
-	}
-
-	ref, err := repo.Head()
-	if err != nil {
-		fmt.Printf("Failed to get HEAD\n")
-		return nil, err
-	}
-
-	commits, err := repo.Log(&git.LogOptions{From: ref.Hash()})
-	if err != nil {
-		fmt.Printf("Failed to get commit history: %v\n", err)
-		return nil, err
-	}
-
-	return commits, nil
-}
-
-func GetRepoCommitsFrom(date time.Time) ([]*object.Commit, func(), error) {
-	dir, err := os.MkdirTemp("", "repo-clone")
-	if err != nil {
-		fmt.Printf("Failed to create temp directory\n")
 		return nil, nil, err
 	}
 
@@ -96,14 +60,48 @@ func GetRepoCommitsFrom(date time.Time) ([]*object.Commit, func(), error) {
 	}
 
 	repo, err := git.PlainClone(dir, false, &git.CloneOptions{
-		URL: repoURL,
+		URL: repoUrl,
 	})
+	if err != nil {
+		return nil, cleanup, err
+	}
+
+	return repo, cleanup, nil
+}
+
+func GetRepoCommits(numCommits int) ([]*object.Commit, func(), error) {
+	repo, cleanup, err := getRepo(repoURL)
+	if err != nil {
+		return nil, cleanup, err
+	}
+
+	commits, err := repo.Log(&git.LogOptions{})
+	if err != nil {
+		return nil, cleanup, err
+	}
+
+	commitsArray := []*object.Commit{}
+
+	for i := 0; i < numCommits; i++ {
+		commit, err := commits.Next()
+		if err != nil {
+			return nil, cleanup, err
+		}
+		commitsArray = append(commitsArray, commit)
+	}
+
+	return commitsArray, cleanup, nil
+}
+
+func GetRepoCommitsFrom(date time.Time) ([]*object.Commit, func(), error) {
+	repo, cleanup, err := getRepo(repoURL)
 	if err != nil {
 		return nil, cleanup, err
 	}
 
 	commits, err := repo.Log(&git.LogOptions{Since: &date})
 	if err != nil {
+		fmt.Printf("Failed to get commit history: %v\n", err)
 		return nil, cleanup, err
 	}
 

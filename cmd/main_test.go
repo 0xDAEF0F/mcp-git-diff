@@ -7,19 +7,15 @@ import (
 )
 
 func TestGetRepoCommits(t *testing.T) {
-	commits, err := GetRepoCommits(1)
+	commits, cleanup, err := GetRepoCommits(10)
 	if err != nil {
 		t.Errorf("Failed to get repo commits: %v\n", err)
 	}
+	defer cleanup()
 
-	commit, err := commits.Next()
-
-	fmt.Printf("Author email: %s\n", commit.Author.Email)
-
-	if len(commit.Hash.String()) != 40 {
-		t.Errorf("Commit hash is not 40 characters: %s\n", commit.Hash.String())
+	if len(commits) != 10 {
+		t.Errorf("Expected 10 commits, got %d\n", len(commits))
 	}
-
 }
 
 func TestGetRepoCommitsFrom(t *testing.T) {
