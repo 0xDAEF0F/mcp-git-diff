@@ -1,4 +1,4 @@
-package main
+package gitops
 
 import (
 	"fmt"
@@ -7,7 +7,7 @@ import (
 )
 
 func TestGetRepoCommits(t *testing.T) {
-	commits, cleanup, err := GetRepoCommits(10)
+	commits, cleanup, err := GetRepoCommits("https://github.com/0xDAEF0F/whistle.git", 10)
 	if err != nil {
 		t.Errorf("Failed to get repo commits: %v\n", err)
 	}
@@ -20,7 +20,7 @@ func TestGetRepoCommits(t *testing.T) {
 
 func TestGetRepoCommitsFrom(t *testing.T) {
 	lastWeek := time.Now().AddDate(0, 0, -7)
-	commits, cleanup, err := GetRepoCommitsFrom(lastWeek)
+	commits, cleanup, err := GetRepoCommitsFrom("https://github.com/0xDAEF0F/whistle.git", lastWeek)
 	if err != nil {
 		t.Errorf("Failed to get repo commits: %v\n", err)
 	}

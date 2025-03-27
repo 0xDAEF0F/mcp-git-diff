@@ -1,13 +1,14 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
-	"os"
-	"strings"
 	"time"
 
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing/object"
+	gitops "github.com/0xDAEF0F/mcp-git-diff/internal"
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 )
 
 const (
@@ -15,101 +16,57 @@ const (
 )
 
 func main() {
-	lastWeek := time.Now().AddDate(0, 0, -7)
-	commits, cleanup, err := GetRepoCommitsFrom(lastWeek)
-	if err != nil {
-		fmt.Printf("Failed to get repo commits: %v\n", err)
-		return
-	}
-	defer cleanup()
+	// Create a new MCP server
+	s := server.NewMCPServer(
+		"Git Diff Demo",
+		"1.0.0",
+		server.WithResourceCapabilities(true, true),
+		server.WithLogging(),
+	)
 
-	lastCommit := commits[0]
-	firstCommit := commits[len(commits)-1]
+	// Add git diff tool
+	gitDiffTool := mcp.NewTool("git-diff",
+		mcp.WithDescription("Perform git diff operations"),
+		mcp.WithString("repository-url",
+			mcp.Required(),
+			mcp.Description("The URL of the repository to diff"),
+		),
+		mcp.WithNumber("num-days",
+			mcp.Required(),
+			mcp.Description("The number of days to diff against: 1.0 = 1 day, 2.0 = 2 days, etc."),
+		),
+	)
 
-	patch, err := firstCommit.Patch(lastCommit)
-	if err != nil {
-		fmt.Printf("Failed to get patch: %v\n", err)
-		return
-	}
+	// Add the git diff handler
+	s.AddTool(gitDiffTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		repoUrl, ok1 := request.Params.Arguments["repository-url"].(string)
+		numDays, ok2 := request.Params.Arguments["num-days"].(float64)
 
-	// Filter out lock files from the patch output
-	patchLines := strings.Split(patch.String(), "\n")
-	var filteredLines []string
-	isLockFile := false
-
-	for _, line := range patchLines {
-		if strings.HasPrefix(line, "diff --git") {
-			isLockFile = strings.Contains(line, "lock")
+		if !ok1 || !ok2 {
+			return nil, errors.New("Invalid arguments")
 		}
-		if !isLockFile {
-			filteredLines = append(filteredLines, line)
-		}
-	}
 
-	fmt.Print(strings.Join(filteredLines, "\n"))
-}
+		time := time.Now().AddDate(0, 0, int(-numDays))
+		commits, cleanup, err := gitops.GetRepoCommitsFrom(repoUrl, time)
+		defer cleanup()
 
-func getRepo(repoUrl string) (*git.Repository, func(), error) {
-	dir, err := os.MkdirTemp("", "repo-clone")
-	if err != nil {
-		return nil, nil, err
-	}
-
-	cleanup := func() {
-		os.RemoveAll(dir)
-	}
-
-	repo, err := git.PlainClone(dir, false, &git.CloneOptions{
-		URL: repoUrl,
-	})
-	if err != nil {
-		return nil, cleanup, err
-	}
-
-	return repo, cleanup, nil
-}
-
-func GetRepoCommits(numCommits int) ([]*object.Commit, func(), error) {
-	repo, cleanup, err := getRepo(repoURL)
-	if err != nil {
-		return nil, cleanup, err
-	}
-
-	commits, err := repo.Log(&git.LogOptions{})
-	if err != nil {
-		return nil, cleanup, err
-	}
-
-	commitsArray := []*object.Commit{}
-
-	for i := 0; i < numCommits; i++ {
-		commit, err := commits.Next()
 		if err != nil {
-			return nil, cleanup, err
+			return nil, errors.New("Failed to retrieve commits")
 		}
-		commitsArray = append(commitsArray, commit)
-	}
 
-	return commitsArray, cleanup, nil
-}
+		lastCommit := commits[0]
+		firstCommit := commits[len(commits)-1]
 
-func GetRepoCommitsFrom(date time.Time) ([]*object.Commit, func(), error) {
-	repo, cleanup, err := getRepo(repoURL)
-	if err != nil {
-		return nil, cleanup, err
-	}
+		patch, err := firstCommit.Patch(lastCommit)
+		if err != nil {
+			return nil, errors.New("Failed to retrieve patch")
+		}
 
-	commits, err := repo.Log(&git.LogOptions{Since: &date})
-	if err != nil {
-		fmt.Printf("Failed to get commit history: %v\n", err)
-		return nil, cleanup, err
-	}
-
-	commitsArray := []*object.Commit{}
-	commits.ForEach(func(c *object.Commit) error {
-		commitsArray = append(commitsArray, c)
-		return nil
+		return mcp.NewToolResultText(patch.String()), nil
 	})
 
-	return commitsArray, cleanup, nil
+	// Start the server
+	if err := server.ServeStdio(s); err != nil {
+		fmt.Printf("Server error: %v\n", err)
+	}
 }
