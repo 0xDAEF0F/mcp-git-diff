@@ -6,13 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	gitops "github.com/0xDAEF0F/mcp-git-diff/internal"
+	"github.com/0xDAEF0F/mcp-git-diff/internal/gitops"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-)
-
-const (
-	repoURL = "https://github.com/0xDAEF0F/whistle.git"
 )
 
 func main() {
@@ -35,6 +31,12 @@ func main() {
 			mcp.Required(),
 			mcp.Description("The number of days to diff against: 1.0 = 1 day, 2.0 = 2 days, etc."),
 		),
+		mcp.WithString("author-email",
+			mcp.Description("The email of the author to diff against"),
+		),
+		mcp.WithString("branch",
+			mcp.Description("The branch to diff against"),
+		),
 	)
 
 	// Add the git diff handler
@@ -43,26 +45,38 @@ func main() {
 		numDays, ok2 := request.Params.Arguments["num-days"].(float64)
 
 		if !ok1 || !ok2 {
-			return nil, errors.New("Invalid arguments")
+			return nil, errors.New("Invalid required arguments")
 		}
 
-		time := time.Now().AddDate(0, 0, int(-numDays))
-		commits, cleanup, err := gitops.GetRepoCommitsFrom(repoUrl, time)
-		defer cleanup()
+		// Handle optional parameters
+		var authorEmail, branch string
+		if authorVal, exists := request.Params.Arguments["author-email"]; exists && authorVal != nil {
+			authorEmail, _ = authorVal.(string)
+		}
+
+		if branchVal, exists := request.Params.Arguments["branch"]; exists && branchVal != nil {
+			branch, _ = branchVal.(string)
+		}
+
+		opts := gitops.CommitOpts{
+			Since: time.Now().AddDate(0, 0, int(-numDays)),
+		}
+
+		if authorEmail != "" {
+			opts.AuthorEmail = &authorEmail
+		}
+
+		if branch != "" {
+			opts.Branch = &branch
+		}
+
+		diff, err := gitops.GetDiffWithOpts(repoUrl, &opts)
 
 		if err != nil {
 			return nil, errors.New("Failed to retrieve commits")
 		}
 
-		lastCommit := commits[0]
-		firstCommit := commits[len(commits)-1]
-
-		patch, err := firstCommit.Patch(lastCommit)
-		if err != nil {
-			return nil, errors.New("Failed to retrieve patch")
-		}
-
-		return mcp.NewToolResultText(patch.String()), nil
+		return mcp.NewToolResultText(diff), nil
 	})
 
 	// Start the server
