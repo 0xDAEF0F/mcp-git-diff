@@ -83,3 +83,44 @@ func getGitRepo(repoUrl string, depth ...uint) (*git.Repository, func(), error) 
 
 	return repo, cleanup, nil
 }
+
+type Contributor struct {
+	Name  string
+	Email string
+}
+
+func GetContributors(repoUrl string) ([]Contributor, error) {
+	repo, cleanup, err := getGitRepo(repoUrl)
+	defer cleanup()
+	if err != nil {
+		return nil, err
+	}
+
+	commits, err := repo.Log(&git.LogOptions{All: true})
+	if err != nil {
+		return nil, err
+	}
+
+	contributorsMap := make(map[string]Contributor)
+	err = commits.ForEach(func(c *object.Commit) error {
+		email := c.Author.Email
+		if _, exists := contributorsMap[email]; !exists {
+			contributorsMap[email] = Contributor{
+				Name:  c.Author.Name,
+				Email: email,
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	contributors := make([]Contributor, 0, len(contributorsMap))
+	for _, contributor := range contributorsMap {
+		contributors = append(contributors, contributor)
+	}
+
+	return contributors, nil
+}
