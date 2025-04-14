@@ -90,100 +90,22 @@ func TestGetContributors(t *testing.T) {
 }
 
 func TestGetDiffWithSingleCommit(t *testing.T) {
-	// 1. Create in-memory storage
 	storer := memory.NewStorage()
+	blobHash := createBlob(t, storer, "Hello, World!")
+	treeEntry := object.TreeEntry{Name: "README.md", Mode: 0100644, Hash: blobHash}
+	treeHash := createTree(t, storer, treeEntry)
+	commitHash := createCommit(t, storer, treeHash)
 
-	// 2. Create and store the file content blob
-	blob := storer.NewEncodedObject()
-	blob.SetType(plumbing.BlobObject)
-	writer, err := blob.Writer()
-	if err != nil {
-		t.Fatalf("Failed to get blob writer: %v", err)
-	}
-	_, err = writer.Write([]byte("Hello, World!"))
-	if err != nil {
-		t.Fatalf("Failed to write blob content: %v", err)
-	}
-	err = writer.Close()
-	if err != nil {
-		t.Fatalf("Failed to close blob writer: %v", err)
-	}
-	blobHash := blob.Hash()
-
-	// 3. Create a tree entry for the file
-	treeEntry := object.TreeEntry{
-		Name: "README.md",
-		Mode: 0100644, // Regular file mode
-		Hash: blobHash,
-	}
-
-	// 4. Create and store the tree object
-	tree := &object.Tree{
-		Entries: []object.TreeEntry{treeEntry},
-	}
-	treeObject := storer.NewEncodedObject()
-	err = tree.Encode(treeObject)
-	if err != nil {
-		t.Fatalf("Failed to encode tree object: %v", err)
-	}
-	treeHash := treeObject.Hash()
-
-	// 5. Create and store the commit object
-	commit := &object.Commit{
-		Author: object.Signature{
-			Name:  "Test User",
-			Email: "test@example.com",
-			When:  time.Now(),
-		},
-		Committer: object.Signature{
-			Name:  "Test User",
-			Email: "test@example.com",
-			When:  time.Now(),
-		},
-		Message:  "Initial commit",
-		TreeHash: treeHash,
-	}
-	commitObject := storer.NewEncodedObject()
-	err = commit.Encode(commitObject)
-	if err != nil {
-		t.Fatalf("Failed to encode commit object: %v", err)
-	}
-	commitHash := commitObject.Hash()
-
-	// 6. Initialize the repository using the storer.
 	repo, err := git.Init(storer, nil)
 	if err != nil {
 		t.Fatalf("Failed to initialize in-memory repository: %v", err)
 	}
-
-	// Store the blob object (file content)
-	_, err = repo.Storer.SetEncodedObject(blob)
-	if err != nil {
-		t.Fatalf("Failed to store blob object: %v", err)
-	}
-
-	// Store the tree object
-	_, err = repo.Storer.SetEncodedObject(treeObject)
-	if err != nil {
-		t.Fatalf("Failed to store tree object: %v", err)
-	}
-
-	// Store the commit object itself
-	_, err = repo.Storer.SetEncodedObject(commitObject)
-	if err != nil {
-		t.Fatalf("Failed to store commit object: %v", err)
-	}
-
-	// 7. Update HEAD to point to the created commit
 	headRef := plumbing.NewHashReference(plumbing.HEAD, commitHash)
-	err = repo.Storer.SetReference(headRef)
-	if err != nil {
+	if err := repo.Storer.SetReference(headRef); err != nil {
 		t.Fatalf("Failed to set HEAD reference: %v", err)
 	}
 
-	diff, err := GetDiffWithOpts(repo, &CommitOpts{
-		Since: time.Now().AddDate(-1, 0, 0),
-	})
+	diff, err := GetDiffWithOpts(repo, &CommitOpts{Since: time.Now().AddDate(-1, 0, 0)})
 	if err != nil {
 		t.Errorf("Failed to get diff: %v\n", err)
 	}
@@ -194,4 +116,61 @@ func TestGetDiffWithSingleCommit(t *testing.T) {
 	if !strings.Contains(diff, "README.md") {
 		t.Errorf("Expected diff to contain 'README.md', but got: %s", diff)
 	}
+}
+
+// Helper functions for creating in-memory objects
+func createBlob(t *testing.T, storer *memory.Storage, content string) plumbing.Hash {
+	t.Helper()
+	blob := storer.NewEncodedObject()
+	blob.SetType(plumbing.BlobObject)
+	writer, err := blob.Writer()
+	if err != nil {
+		t.Fatalf("Failed to get blob writer: %v", err)
+	}
+	_, err = writer.Write([]byte(content))
+	if err != nil {
+		t.Fatalf("Failed to write blob content: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Failed to close blob writer: %v", err)
+	}
+	_, err = storer.SetEncodedObject(blob)
+	if err != nil {
+		t.Fatalf("Failed to store blob object: %v", err)
+	}
+	return blob.Hash()
+}
+
+func createTree(t *testing.T, storer *memory.Storage, entry object.TreeEntry) plumbing.Hash {
+	t.Helper()
+	tree := &object.Tree{Entries: []object.TreeEntry{entry}}
+	treeObj := storer.NewEncodedObject()
+	if err := tree.Encode(treeObj); err != nil {
+		t.Fatalf("Failed to encode tree object: %v", err)
+	}
+	_, err := storer.SetEncodedObject(treeObj)
+	if err != nil {
+		t.Fatalf("Failed to store tree object: %v", err)
+	}
+	return treeObj.Hash()
+}
+
+func createCommit(t *testing.T, storer *memory.Storage, treeHash plumbing.Hash) plumbing.Hash {
+	t.Helper()
+	now := time.Now()
+	commit := &object.Commit{
+		Author:    object.Signature{Name: "Test User", Email: "test@example.com", When: now},
+		Committer: object.Signature{Name: "Test User", Email: "test@example.com", When: now},
+		Message:   "Initial commit",
+		TreeHash:  treeHash,
+	}
+	commitObj := storer.NewEncodedObject()
+	if err := commit.Encode(commitObj); err != nil {
+		t.Fatalf("Failed to encode commit object: %v", err)
+	}
+	_, err := storer.SetEncodedObject(commitObj)
+	if err != nil {
+		t.Fatalf("Failed to store commit object: %v", err)
+	}
+	return commitObj.Hash()
 }
