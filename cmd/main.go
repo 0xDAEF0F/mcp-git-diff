@@ -58,6 +58,12 @@ func main() {
 			branch, _ = branchVal.(string)
 		}
 
+		repo, cleanup, err := gitops.GetGitRepo(repoUrl)
+		if err != nil {
+			return nil, fmt.Errorf("failed to clone repository: %w", err)
+		}
+		defer cleanup()
+
 		opts := gitops.CommitOpts{
 			Since: time.Now().AddDate(0, 0, int(-numDays)),
 		}
@@ -70,7 +76,7 @@ func main() {
 			opts.Branch = &branch
 		}
 
-		diff, err := gitops.GetDiffWithOpts(repoUrl, &opts)
+		diff, err := gitops.GetDiffWithOpts(repo, &opts)
 
 		if err != nil {
 			return nil, errors.New("Failed to retrieve commits")

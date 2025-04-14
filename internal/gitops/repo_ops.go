@@ -1,6 +1,7 @@
 package gitops
 
 import (
+	"fmt"
 	"os"
 	"time"
 
@@ -15,12 +16,8 @@ type CommitOpts struct {
 	AuthorEmail *string
 }
 
-func GetDiffWithOpts(repoUrl string, opts *CommitOpts) (string, error) {
-	repo, cleanup, err := getGitRepo(repoUrl)
-	defer cleanup()
-	if err != nil {
-		return "", err
-	}
+func GetDiffWithOpts(repo *git.Repository, opts *CommitOpts) (string, error) {
+	fmt.Printf("Getting commits\n")
 
 	logOpts := &git.LogOptions{
 		Since: &opts.Since,
@@ -29,6 +26,7 @@ func GetDiffWithOpts(repoUrl string, opts *CommitOpts) (string, error) {
 	if opts.Branch != nil {
 		ref, err := repo.Reference(plumbing.NewBranchReferenceName(*opts.Branch), true)
 		if err != nil {
+			fmt.Printf("Error getting branch reference: %v\n", err)
 			return "", err
 		}
 		logOpts.From = ref.Hash()
@@ -36,6 +34,7 @@ func GetDiffWithOpts(repoUrl string, opts *CommitOpts) (string, error) {
 
 	commits, err := repo.Log(logOpts)
 	if err != nil {
+		fmt.Printf("Error getting commits: %v\n", err)
 		return "", err
 	}
 
@@ -50,6 +49,22 @@ func GetDiffWithOpts(repoUrl string, opts *CommitOpts) (string, error) {
 	lastCommit := commitsArray[0]
 	firstCommit := commitsArray[len(commitsArray)-1]
 
+	// Only one commit in this range
+	if lastCommit.Hash == firstCommit.Hash {
+		prevCommit, err := lastCommit.Parent(0)
+		// No last commit
+		if err != nil {
+			tree, _ := lastCommit.Tree()
+			patch, err := (&object.Tree{}).Patch(tree)
+			if err != nil {
+				fmt.Printf("Error patching tree: %v\n", err)
+				return "", err
+			}
+			return patch.String(), nil
+		}
+		firstCommit = prevCommit
+	}
+
 	patch, err := firstCommit.Patch(lastCommit)
 	if err != nil {
 		return "", err
@@ -58,7 +73,8 @@ func GetDiffWithOpts(repoUrl string, opts *CommitOpts) (string, error) {
 	return patch.String(), nil
 }
 
-func getGitRepo(repoUrl string, depth ...uint) (*git.Repository, func(), error) {
+// GetGitRepo clones a git repository into a temporary directory and returns the repository object and a cleanup function.
+func GetGitRepo(repoUrl string, depth ...uint) (*git.Repository, func(), error) {
 	dir, err := os.MkdirTemp("", "repo-clone")
 	if err != nil {
 		return nil, nil, err
@@ -89,13 +105,7 @@ type Contributor struct {
 	Email string
 }
 
-func GetContributors(repoUrl string) ([]Contributor, error) {
-	repo, cleanup, err := getGitRepo(repoUrl)
-	defer cleanup()
-	if err != nil {
-		return nil, err
-	}
-
+func GetContributors(repo *git.Repository) ([]Contributor, error) {
 	commits, err := repo.Log(&git.LogOptions{All: true})
 	if err != nil {
 		return nil, err
