@@ -1,7 +1,6 @@
 package gitops
 
 import (
-	"fmt"
 	"os"
 	"time"
 
@@ -17,8 +16,6 @@ type CommitOpts struct {
 }
 
 func GetDiffWithOpts(repo *git.Repository, opts *CommitOpts) (string, error) {
-	fmt.Printf("Getting commits\n")
-
 	logOpts := &git.LogOptions{
 		Since: &opts.Since,
 	}
@@ -26,7 +23,6 @@ func GetDiffWithOpts(repo *git.Repository, opts *CommitOpts) (string, error) {
 	if opts.Branch != nil {
 		ref, err := repo.Reference(plumbing.NewBranchReferenceName(*opts.Branch), true)
 		if err != nil {
-			fmt.Printf("Error getting branch reference: %v\n", err)
 			return "", err
 		}
 		logOpts.From = ref.Hash()
@@ -34,7 +30,6 @@ func GetDiffWithOpts(repo *git.Repository, opts *CommitOpts) (string, error) {
 
 	commits, err := repo.Log(logOpts)
 	if err != nil {
-		fmt.Printf("Error getting commits: %v\n", err)
 		return "", err
 	}
 
@@ -45,6 +40,10 @@ func GetDiffWithOpts(repo *git.Repository, opts *CommitOpts) (string, error) {
 		}
 		return nil
 	})
+
+	if len(commitsArray) == 0 {
+		return "", nil
+	}
 
 	lastCommit := commitsArray[0]
 	firstCommit := commitsArray[len(commitsArray)-1]
@@ -57,7 +56,6 @@ func GetDiffWithOpts(repo *git.Repository, opts *CommitOpts) (string, error) {
 			tree, _ := lastCommit.Tree()
 			patch, err := (&object.Tree{}).Patch(tree)
 			if err != nil {
-				fmt.Printf("Error patching tree: %v\n", err)
 				return "", err
 			}
 			return patch.String(), nil

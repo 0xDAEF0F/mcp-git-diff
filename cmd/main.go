@@ -79,7 +79,7 @@ func main() {
 		diff, err := gitops.GetDiffWithOpts(repo, &opts)
 
 		if err != nil {
-			return nil, errors.New("Failed to retrieve commits")
+			return nil, fmt.Errorf("Error getting diff: %w", err)
 		}
 
 		return mcp.NewToolResultText(diff), nil
